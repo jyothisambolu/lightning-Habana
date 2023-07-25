@@ -83,6 +83,7 @@ _HPU_DEEPSPEED_AVAILABLE = (
     # HPU deep speed is supported only through this pip install git+https://github.com/HabanaAI/DeepSpeed.git@1.10.0
     RequirementCache("deepspeed==0.7.7+hpu.synapse.v1.10.0")
     or RequirementCache("deepspeed==0.7.7+ca649af")
+    or module_available("deepspeed") # CAUTION: This shouldn't be upstreamed
 )
 if TYPE_CHECKING and _HPU_DEEPSPEED_AVAILABLE:
     import deepspeed
