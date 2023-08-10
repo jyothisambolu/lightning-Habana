@@ -81,7 +81,8 @@ warning_cache = WarningCache()
 # WA : TBD : there is an issue with internal habana pipelines wrt deepspeed package naming in 1.10.0 release
 _HPU_DEEPSPEED_AVAILABLE = (
     # HPU deep speed is supported only through this pip install git+https://github.com/HabanaAI/DeepSpeed.git@1.10.0
-    RequirementCache("deepspeed==0.7.7+hpu.synapse.v1.10.0")
+    RequirementCache("deepspeed==0.9.4+hpu.synapse.v1.11.0")
+    or RequirementCache("deepspeed==0.7.7+hpu.synapse.v1.10.0")
     or RequirementCache("deepspeed==0.7.7+ca649af")
 )
 if TYPE_CHECKING and _HPU_DEEPSPEED_AVAILABLE:
@@ -111,7 +112,11 @@ class HPUDeepSpeedStrategy(HPUParallelStrategy):
     These defaults have been set generally, but may require tuning for optimum performance based on your model size.
     `For more information: https://www.deepspeed.ai/docs/config-json/#zero-optimizations-for-fp16-training`.
 
-    Arguments:
+    Note:
+    It is recommended to define the optimizer and otpmizer params in `LightningModule.configure_optimizers`.
+    The optimizer defined by LightningModule overrides any optimizer and optimizer params specified in DeepSpeed configuration file.
+
+        Arguments:
         zero_optimization: Enable ZeRO optimization. This is compatible with either `precision="16-mixed"` or
             `precision="bf16-mixed"`.
         stage: Different stages of the ZeRO Optimizer. 0 is disabled,
@@ -461,6 +466,12 @@ class HPUDeepSpeedStrategy(HPUParallelStrategy):
             raise MisconfigurationException(
                 "DeepSpeed currently only supports single optimizer, single optional scheduler."
             )
+        if str(optimizers[0]) == 'No Optimizer':
+            raise MisconfigurationException(
+                "You have specified an invalid optimizer to be run with deepspeed. Please check deepspeed documentation for the supported optimizers"
+            )
+
+        rank_zero_info(f"Deepspeed will be configured with the optimizer {optimizers[0]}")
         return optimizers[0], lr_schedulers[0] if lr_schedulers else None
 
     @property
@@ -472,23 +483,19 @@ class HPUDeepSpeedStrategy(HPUParallelStrategy):
     def _initialize_deepspeed_train(self, model: Module) -> None:
         optimizer, scheduler = None, None
         assert isinstance(self.config, dict)
+        optimizer, lr_scheduler = self._init_optimizers()
+        if lr_scheduler is not None:
+            scheduler = lr_scheduler.scheduler
+
         if "optimizer" in self.config:
             rank_zero_info(
                 "You have specified an optimizer and/or scheduler within the DeepSpeed config."
-                " It is recommended to define it in `LightningModule.configure_optimizers`."
+                    " It is recommended to define it in `LightningModule.configure_optimizers`."
+                    " The optimizer defined by LightningModule overrides any optimizer specified in DeepSpeed config."
             )
-            lr_scheduler = None
-        else:
-            (
-                optimizer,
-                lr_scheduler,
-            ) = self._init_optimizers()
-            if lr_scheduler is not None:
-                scheduler = lr_scheduler.scheduler
 
         model, deepspeed_optimizer = self._setup_model_and_optimizer(model, optimizer, scheduler)
         self._set_deepspeed_activation_checkpointing()
-
         # although we set these here, deepspeed manages the specific optimizer logic
         self.optimizers = [deepspeed_optimizer]
 
